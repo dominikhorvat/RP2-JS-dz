@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.js"></script>
+    <title>Var</title>
+    <style>
+        .kvadratic {
+            width: 20px;
+            height: 20px;
+            display: inline-block;
+            margin-right: 1px;
+            margin-left: 1px;
+            border: 1px solid #000; 
+        }
+    </style>
+</head>
+<body>
+
+    <div>
+        <button id="prethodna">Prethodna situacija</button>
+        Situacija broj <span id="broj_situacije"></span>
+        <button id="iduca">Iduća situacija</button>
+        <br><br>
+        <span>
+            Utakmica:
+            <div class="kvadratic" id="bojatim1"></div>
+            <span id="info_utakmice"> </span>
+            <div class="kvadratic" id="bojatim2"></div>
+        </span>
+        <br>
+        <p id = "provjerava_se"></p>
+        <p id="stanje_glasova"></p>
+        <p>Glasajte je li <span id="gol_offside"></span></p>
+        <span>Vaša odluka je: <span id="odabir"></span> 
+        <button id="glasaj">Glasaj!</button></span>
+    </div>
+    <br> 
+    <canvas height="375" width="550" id="canvas">
+        Ovaj tekst se prikaže ako canvas nije podržan.
+    </canvas>
+
+<script>
+
+var trenutna = 1;
+var zadnjaSituacija = false;
+var glas = "NE";
+var poz_lopte = {x: 0, y: 0};
+
+let tim1 = [];
+let tim2 = [];
+
+$(document).ready(function(){
+    pozoviajax();
+    //ovo je odmah za pocetnu situaciju t.d. ne mozemo kliknuti na gumb
+    if (trenutna === 1) {
+        $('#prethodna').prop('disabled', true);
+    } 
+    $('#prethodna').click(function() {
+        if (trenutna > 1) {
+            trenutna--;
+            if(trenutna === 1){
+                $('#prethodna').prop('disabled', true);
+            }
+            glas = "NE";
+            linijaIgraca = null;
+            zadnjaSituacija = false;
+            $('#iduca').prop('disabled', false);
+            vecGlasano();
+            pozoviajax();
+        }
+    });
+
+    $('#iduca').click(function() {
+        if (!zadnjaSituacija) {
+            trenutna++;
+            $('#prethodna').prop('disabled', false);
+            glas = "NE";
+            linijaIgraca = null;
+            vecGlasano();
+            pozoviajax();
+        }
+    });
+
+    $('#glasaj').click(function() {
+        potvrdiOdabir();
+    });
+});
+
+function pozoviajax(){
+    $.ajax({
+        url:'https://rp2.studenti.math.hr/~zbujanov/dz4/var.php',
+        method: 'GET',
+        data:{
+            situacija: trenutna,
+            //glas: glas
+        },
+        dataType:'json',
+        success: function(data){
+            if(typeof(data.error) !== 'undefined') {
+                console.log('Error: ' + data.error);
+                zadnjaSituacija = true;
+                $('#iduca').prop('disabled', true);
+            } else {
+                zadnjaSituacija = false;
+                $('#iduca').prop('disabled', false);
+
+                tim1 = data['tim1'];
+                tim2 = data['tim2'];
+
+                $('#broj_situacije').text(' ' + trenutna);
+                // za svaki tim odgovarajuca boja
+                $('#bojatim1').css('background-color', data['tim1']['boja']);
+                $('#bojatim2').css('background-color', data['tim2']['boja']);
+                // tko protiv koga igra za situaciju
+                $('#info_utakmice').text(data['tim1']['ime'] + ' - ' + data['tim2']['ime']);
+                //treunta provjera akcije (gol ili offside)
+                if(data['tip_situacije'] === "gol"){
+                    $('#provjerava_se').text('Provjera je li ' + data['tim1']['ime'] + ' dala gol.')
+                }
+                else{
+                    //ako je tip situacije = offside
+                    $('#provjerava_se').text('Provjera je li ' + data['tim1']['ime'] + ' napravila offside.')
+                }
+                // stanje glasova
+                $('#stanje_glasova').text('Do sada: ' + data['broj_glasova'][0] + ' gledatelja kaže DA, ' + data['broj_glasova'][1] + ' gledatelja kaže NE.');
+                // tip situacije
+                $('#gol_offside').text(data['tip_situacije'] + '!');
+                // da / ne za odluku, pocetno je NE!
+                $('#odabir').text(glas);
+                if(data['tip_situacije'] === "gol")
+                    poz_lopte = data['lopta'][1];
+                else
+                    poz_lopte = data['lopta'][0];
+                crtajTeren();
+                crtajIgraca(data['tim1']['igraci'],data['tim1']['boja']);
+                crtajIgraca(data['tim2']['igraci'],data['tim2']['boja']);
+                crtajLoptu(data['lopta'], data['tip_situacije']);
+                
+                $('#canvas').off('click').on('click', function(event) {
+                    let rect = this.getBoundingClientRect();
+                    let x = event.clientX - rect.left;
+                    let y = event.clientY - rect.top;
+                    
+                    if (data['tip_situacije'] === "gol") {
+                        let dist = Math.sqrt(Math.pow(x - poz_lopte.x - 25, 2) + Math.pow(y - poz_lopte.y - 25, 2));
+                        if (dist <= 7) {
+                            glas = "DA";
+                        } else {
+                            glas = "NE";
+                        }
+                        $('#odabir').text(glas);
+                        crtajTeren();
+                        crtajIgraca(data['tim1']['igraci'],data['tim1']['boja']);
+                        crtajIgraca(data['tim2']['igraci'],data['tim2']['boja']);
+                        crtajLoptu(data['lopta'], data['tip_situacije']);
+                    }
+                    else{
+                        //situacija kada je offside
+                        let igracKliknut = false;
+                        glas = "NE";
+                        for (let igrac of tim2.igraci) {
+                            if (x >= igrac.x + 20 && x <= igrac.x + 36 && y >= igrac.y + 20 && y <= igrac.y + 36) {
+                                linijaIgraca = igrac;
+                                igracKliknut = true;
+                                glas = "DA";
+                                break;
+                            }
+                        }
+                        if(!igracKliknut){
+                            for (let igrac of tim1.igraci) {
+                                if (x >= igrac.x + 20 && x <= igrac.x + 36 && y >= igrac.y + 20 && y <= igrac.y + 36) {
+                                    linijaIgraca = igrac;
+                                    igracKliknut = true;
+                                    break;
+                                }
+                            }
+                        }
+                        crtajTeren();
+                        crtajIgraca(data['tim1']['igraci'],data['tim1']['boja']);
+                        crtajIgraca(data['tim2']['igraci'],data['tim2']['boja']);
+                        crtajLoptu(data['lopta'], data['tip_situacije']);
+                        if (!igracKliknut) {
+                            linijaIgraca = null;
+                            glas = "NE";
+                        }
+                        else{
+                            crtajLinijuOffside(linijaIgraca.y + 28);
+                        }
+                        $('#odabir').text(glas);
+                    }           
+                });
+
+                vecGlasano();
+            }
+        },
+        error: function(xhr, status){
+            console.log('Greška: ' + status);
+        }
+    });
+}
+
+function potvrdiOdabir() {
+    $.ajax({
+        url: 'https://rp2.studenti.math.hr/~zbujanov/dz4/var.php',
+        method: 'GET',
+        data: {
+            situacija: trenutna,
+            glas: glas
+        },
+        dataType: 'json',
+        success: function(data) {
+            if (typeof(data.error) !== 'undefined') {
+                console.log('Error: ' + data.error);
+            } else {
+                $('#stanje_glasova').text('Do sada: ' + data['broj_glasova'][0] + ' gledatelja kaže DA, ' + data['broj_glasova'][1] + ' gledatelja kaže NE.');
+                localStorage.setItem('glasanoZa_' + trenutna, true);
+                $('#glasaj').prop('disabled', true); 
+            }
+        },
+        error: function(xhr, status) {
+            console.log('Greška: ' + status);
+        }
+    });
+}
+
+function crtajLoptu(lopta, tip_situacije) {
+    //tip_situacije da znamo na kojim ce koord biti lopta, prvim ili drugim
+    let ctx = $('#canvas').get(0).getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    if(tip_situacije === "gol"){
+        ctx.arc(lopta[1].x + 25, lopta[1].y + 25, 7, 0, 2 * Math.PI); 
+        ctx.fill();
+        if (glas === "DA") {
+            crtajKvadraticLopte(lopta[1].x + 15, lopta[1].y + 15);
+        }
+    }
+    else{
+        //inace offside
+        ctx.arc(lopta[0].x + 25, lopta[0].y + 25, 7, 0, 2 * Math.PI);
+        ctx.fill();
+    }
+    //crtam liniju
+    ctx.strokeStyle = '#ffffff'; 
+    ctx.lineWidth = 2;
+    ctx.beginPath(); 
+    ctx.moveTo(lopta[0].x + 25, lopta[0].y + 25);
+    ctx.lineTo(lopta[1].x + 25, lopta[1].y + 25);
+    ctx.stroke();
+}
+
+function crtajKvadraticLopte(koord_x, koord_y) {
+    let ctx = $('#canvas').get(0).getContext('2d');
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([5,3]);
+    ctx.strokeRect(koord_x, koord_y, 20, 20);
+    ctx.setLineDash([]);
+}
+function crtajTeren() {
+    let ctx = $('#canvas').get(0).getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#3fa138';
+    ctx.fillRect(0, 0, 550, 375);
+    //linija terena
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = '#ffffff';
+    ctx.strokeRect(25, 25, 500, 350);
+    //linija blize golu
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = '#ffffff';
+    ctx.strokeRect(225, 25, 100, 32);
+    //linija dalje od gola
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = '#ffffff';
+    ctx.strokeRect(175, 25, 200, 96);
+    //luk
+    ctx.beginPath();
+    ctx.arc(275, 121, 40, 0, Math.PI); 
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = '#ffffff';
+    ctx.stroke();
+    //gol
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(235, 24.5, 80, 3);
+}
+
+function crtajIgraca(tim, boja) {
+    let ctx = $('#canvas').get(0).getContext('2d');
+    ctx.fillStyle = boja;
+    for(let i = 0; i < tim.length; i++){
+        ctx.fillRect(tim[i].x + 20, tim[i].y + 20, 16, 16);
+    }
+}
+
+function crtajLinijuOffside(koord_y) {
+    let ctx = $('#canvas').get(0).getContext('2d');
+    ctx.strokeStyle = '#ffffff'; 
+    ctx.lineWidth = 1;
+    ctx.setLineDash([8, 3]); 
+    ctx.beginPath();
+    ctx.moveTo(0, koord_y);
+    ctx.lineTo(550, koord_y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+}
+
+function vecGlasano() {
+    if (localStorage.getItem('glasanoZa_' + trenutna)) {
+        $('#glasaj').prop('disabled', true);
+    } else {
+        $('#glasaj').prop('disabled', false);
+    }
+}
+
+</script>
+</body>
+</html>
